@@ -1,0 +1,66 @@
+# collector/collector.yaml
+#
+# The OTel Collector is the heart of the pipeline.
+# It receives ALL data from Device A, but only forwards
+# temperature and pressure to the backend.
+#
+# Key sections:
+#   receivers  — what data comes IN
+#   processors — what happens to the data (filtering, labelling)
+#   exporters  — where data goes OUT
+#   service    — wire them together
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317   # Device A sends here (port 4317)
+      http:
+        endpoint: 0.0.0.0:4318    # HTTP alternative (not 4319!)
+
+processors:
+  # --- FILTER: only let these two metrics through ---
+  # Everything else (battery_level, errors) is dropped here.
+  filter/device_a_subset:
+    error_mode: ignore
+    metrics:
+      metric:
+        - 'name != "device.temperature" and name != "device.pressure"'
+
+  # --- LABELS: stamp every metric with extra info ---
+  attributes/add_env:
+    actions:
+      - key: environment
+        value: production
+        action: insert
+      - key: pipeline
+        value: otel-mock-demo
+        action: insert
+
+  # --- BATCH: group metrics before sending (more efficient) ---
+  batch:
+    timeout: 2s
+
+exporters:
+  # Send filtered metrics to our Node.js backend (HTTP)
+  otlphttp/backend:
+    endpoint: "http://localhost:4320"
+    encoding: json   
+    tls:
+      insecure: true
+
+  # Also expose a Prometheus endpoint (Grafana can scrape this)
+  # Visit http://localhost:9464/metrics to see raw Prometheus format
+  prometheus:
+    endpoint: "0.0.0.0:9464"
+
+  # Print everything to the collector's own logs (great for debugging)
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    metrics:
+      receivers:  [otlp]
+      processors: [filter/device_a_subset, attributes/add_env, batch]
+      exporters:  [otlphttp/backend, prometheus, debug]
