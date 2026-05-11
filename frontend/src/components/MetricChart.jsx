@@ -8,19 +8,17 @@
 //   metric  — which metric to chart: "temperature" | "pressure"
 //   color   — line color
 
-import React from 'react';
 import {
   LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
 
-// Custom tooltip (the popup when you hover a data point)
-function CustomTooltip({ active, payload, label }) {
-  if (!active || !payload?.length) return null;
+// Custom tooltip — receives `unit` via the `payload[0].unit` custom prop trick
+function CustomTooltip({ active, payload, label, unit }) {
+  if (!active || !payload || !payload.length) return null;
 
   const time  = new Date(label).toLocaleTimeString();
-  const value = payload[0]?.value;
-  const unit  = payload[0]?.name === 'temperature' ? '°C' : 'bar';
+  const value = payload[0] && payload[0].value;
 
   return (
     <div style={{
@@ -29,12 +27,17 @@ function CustomTooltip({ active, payload, label }) {
       fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: '#e8eaf0'
     }}>
       <p style={{ margin: 0, color: '#5a6070' }}>{time}</p>
-      <p style={{ margin: '4px 0 0' }}>{value?.toFixed(3)} {unit}</p>
+      <p style={{ margin: '4px 0 0' }}>{value !== undefined ? value.toFixed(3) : '—'} {unit}</p>
     </div>
   );
 }
 
-export default function MetricChart({ history, metric, color }) {
+// Props:
+//   history — array of { time, [metricName]: number } snapshots
+//   metric  — the metric name key to plot, e.g. "device.temperature"
+//   color   — line color
+//   unit    — unit string for the tooltip, e.g. "°C"
+export default function MetricChart({ history, metric, color, unit }) {
   // Format time labels on the X axis (show only HH:MM:SS)
   const formatTime = (iso) => new Date(iso).toLocaleTimeString();
 
@@ -75,7 +78,7 @@ export default function MetricChart({ history, metric, color }) {
         />
 
         {/* Hover tooltip */}
-        <Tooltip content={<CustomTooltip />} />
+        <Tooltip content={<CustomTooltip unit={unit} />} />
 
         {/* The actual line */}
         <Line

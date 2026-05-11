@@ -1,0 +1,38 @@
+{
+  "devices": [
+    {
+      "id": "device_a",
+      "label": "Device A",
+      "metrics": [
+        {
+          "name":    "device.temperature",
+          "label":   "Temperature",
+          "unit":    "°C",
+          "color":   "#e05a3a",
+          "collect": true
+        },
+        {
+          "name":    "device.pressure",
+          "label":   "Pressure",
+          "unit":    "bar",
+          "color":   "#3a8be0",
+          "collect": false
+        },
+        {
+          "name":    "device.battery_level",
+          "label":   "Battery Level",
+          "unit":    "%",
+          "color":   "#3ae07a",
+          "collect": true
+        },
+        {
+          "name":    "device.errors",
+          "label":   "Error Count",
+          "unit":    "errors",
+          "color":   "#e0c03a",
+          "collect": false
+        }
+      ]
+    }
+  ]
+}

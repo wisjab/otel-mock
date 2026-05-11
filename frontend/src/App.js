@@ -1,80 +1,71 @@
 // src/App.js
 //
-// The root component. It:
-//   1. Polls the backend every 3 seconds for new metrics
-//   2. Passes data down to child components
+// Config-driven dashboard.
+// Fetches the device/metric schema from the backend (/api/devices) once on
+// mount, then polls /api/metrics every 3 s for live values.
 //
-// Key React concepts used here:
-//   useState  — stores values that cause re-renders when they change
-//   useEffect — runs code on a schedule (like setInterval) or on mount
+// No metric names, labels, units, or colors are hardcoded here.
+// Add or remove metrics in config/devices.json → the UI updates automatically.
 
 import React, { useState, useEffect } from 'react';
 import MetricCard  from './components/MetricCard';
 import MetricChart from './components/MetricChart';
 import StatusBar   from './components/StatusBar';
 
-// Where our backend lives
-const API_URL      = 'http://localhost:4320/api/metrics';
-const POLL_INTERVAL = 3000; // ms
+const BACKEND       = 'http://localhost:4320';
+const POLL_INTERVAL = 3000;
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
 const globalStyle = `
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: #080a0f; color: #e8eaf0; }
-
   @keyframes fadeIn {
     from { opacity: 0; transform: translateY(6px); }
     to   { opacity: 1; transform: translateY(0); }
   }
 `;
 
-// ─── Main component ───────────────────────────────────────────────────────────
 export default function App() {
-
-  // useState: declare a piece of state and a setter function.
-  // When the setter is called, React re-renders the component automatically.
-  const [current,      setCurrent]      = useState({ temperature: null, pressure: null });
+  // Schema from /api/devices — array of device objects with their metrics
+  const [devices,      setDevices]      = useState([]);
+  // Live data from /api/metrics
+  const [current,      setCurrent]      = useState({});
   const [history,      setHistory]      = useState([]);
   const [lastUpdated,  setLastUpdated]  = useState(null);
   const [receiveCount, setReceiveCount] = useState(0);
   const [error,        setError]        = useState(null);
 
-  // useEffect: run this block when the component first mounts ([] = run once).
-  // We set up a polling interval here, and clean it up when the component unmounts.
+  // ── 1. Fetch the schema once on mount ──────────────────────────────────────
   useEffect(() => {
-    const fetchMetrics = async () => {
-      try {
-        const res  = await fetch(API_URL);
-        if (!res.ok) throw new Error(`Backend returned ${res.status}`);
-        const data = await res.json();
+    fetch(BACKEND + '/api/devices')
+      .then(r => r.json())
+      .then(data => setDevices(data.devices || []))
+      .catch(e => setError('Cannot load device schema: ' + e.message));
+  }, []);
 
-        setCurrent(data.current);
-        setHistory(data.history);
-        setLastUpdated(data.lastUpdated);
-        setReceiveCount(data.receiveCount);
-        setError(null);
-      } catch (e) {
-        setError(e.message);
-      }
+  // ── 2. Poll live metrics every POLL_INTERVAL ms ────────────────────────────
+  useEffect(() => {
+    const fetchMetrics = () => {
+      fetch(BACKEND + '/api/metrics')
+        .then(r => { if (!r.ok) throw new Error('Backend returned ' + r.status); return r.json(); })
+        .then(data => {
+          setCurrent(data.current || {});
+          setHistory(data.history || []);
+          setLastUpdated(data.lastUpdated);
+          setReceiveCount(data.receiveCount);
+          setError(null);
+        })
+        .catch(e => setError(e.message));
     };
 
-    // Fetch once immediately on load
     fetchMetrics();
-
-    // Then fetch every POLL_INTERVAL ms
     const timer = setInterval(fetchMetrics, POLL_INTERVAL);
-
-    // Cleanup: stop the interval when this component is removed from the page
     return () => clearInterval(timer);
-  }, []); // [] means "only run once on mount"
+  }, []);
 
-  // ─── Render ───────────────────────────────────────────────────────────────
-
+  // ── 3. Render ───────────────────────────────────────────────────────────────
   return (
     <>
       <style>{globalStyle}</style>
-
-      {/* Pipeline status bar at the very top */}
       <StatusBar receiveCount={receiveCount} lastUpdated={lastUpdated} />
 
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '32px 24px' }}>
@@ -83,10 +74,9 @@ export default function App() {
         <div style={{ marginBottom: 40, animation: 'fadeIn 0.6s ease' }}>
           <p style={{
             fontSize: 11, letterSpacing: '0.15em', color: '#2a3a55',
-            textTransform: 'uppercase', fontFamily: "'IBM Plex Mono', monospace",
-            marginBottom: 6
+            textTransform: 'uppercase', fontFamily: "'IBM Plex Mono', monospace", marginBottom: 6
           }}>
-            opentelemetry · device A · zone-1
+            opentelemetry · live pipeline
           </p>
           <h1 style={{
             fontSize: 26, fontWeight: 300, color: '#c8cad8',
@@ -96,91 +86,88 @@ export default function App() {
           </h1>
         </div>
 
-        {/* Error banner — only shown if the backend is unreachable */}
+        {/* Error banner */}
         {error && (
           <div style={{
-            background: '#1a0a0a', border: '1px solid #4a1a1a',
-            borderRadius: 6, padding: '10px 16px', marginBottom: 24,
+            background: '#1a0a0a', border: '1px solid #4a1a1a', borderRadius: 6,
+            padding: '10px 16px', marginBottom: 24,
             fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: '#8a3030'
           }}>
-            ⚠ Cannot reach backend — {error}
-            <span style={{ color: '#3a2020', marginLeft: 12 }}>
-              Is <code>node server.js</code> running?
-            </span>
+            ⚠ {error}
           </div>
         )}
 
-        {/* ── Metric cards row ───────────────────────────────────────────── */}
-        {/*
-          These show the CURRENT (latest) value.
-          The "filtered" prop on the last two shows they are blocked by the collector.
-        */}
-        <section style={{ marginBottom: 40 }}>
-          <SectionLabel>current readings</SectionLabel>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <MetricCard
-              label="Temperature"
-              value={current.temperature}
-              unit="°C"
-              accentColor="#e05a3a"
-            />
-            <MetricCard
-              label="Pressure"
-              value={current.pressure}
-              unit="bar"
-              accentColor="#3a8be0"
-            />
-            {/* These two are filtered — shown here for educational contrast */}
-            <MetricCard label="Battery Level" unit="%" filtered />
-            <MetricCard label="Error Count"   unit="errors" filtered />
-          </div>
-        </section>
+        {/* ── One section per device ─────────────────────────────────────── */}
+        {devices.map(device => {
+          const collected = device.metrics.filter(m => m.collect);
+          const filtered  = device.metrics.filter(m => !m.collect);
 
-        {/* ── Charts ─────────────────────────────────────────────────────── */}
-        {/*
-          Each chart shows the last 30 readings over time.
-          MetricChart takes the full history array and picks one metric to plot.
-        */}
-        <section style={{ marginBottom: 40 }}>
-          <SectionLabel>temperature history</SectionLabel>
-          <ChartBox>
-            <MetricChart history={history} metric="temperature" color="#e05a3a" />
-          </ChartBox>
-        </section>
+          return (
+            <div key={device.id} style={{ marginBottom: 56 }}>
+              <h2 style={{
+                fontSize: 13, fontWeight: 400, color: '#3a4a6a',
+                fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.1em',
+                textTransform: 'uppercase', marginBottom: 24,
+                borderBottom: '1px solid #10141e', paddingBottom: 10
+              }}>
+                {device.label}
+              </h2>
 
-        <section style={{ marginBottom: 40 }}>
-          <SectionLabel>pressure history</SectionLabel>
-          <ChartBox>
-            <MetricChart history={history} metric="pressure" color="#3a8be0" />
-          </ChartBox>
-        </section>
+              {/* Current readings — collected metrics */}
+              <section style={{ marginBottom: 32 }}>
+                <SectionLabel>current readings</SectionLabel>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  {collected.map(m => (
+                    <MetricCard
+                      key={m.name}
+                      label={m.label}
+                      value={current[m.name] !== undefined ? current[m.name] : null}
+                      unit={m.unit}
+                      accentColor={m.color}
+                    />
+                  ))}
+                  {/* Show filtered metrics as greyed-out cards for contrast */}
+                  {filtered.map(m => (
+                    <MetricCard key={m.name} label={m.label} unit={m.unit} filtered />
+                  ))}
+                </div>
+              </section>
 
-        {/* ── OTel pipeline explainer ────────────────────────────────────── */}
+              {/* One chart per collected metric */}
+              {collected.map(m => (
+                <section key={m.name} style={{ marginBottom: 28 }}>
+                  <SectionLabel>{m.label.toLowerCase()} history</SectionLabel>
+                  <ChartBox>
+                    <MetricChart
+                      history={history}
+                      metric={m.name}
+                      color={m.color}
+                      unit={m.unit}
+                    />
+                  </ChartBox>
+                </section>
+              ))}
+            </div>
+          );
+        })}
+
+        {/* ── OTel filter explainer ──────────────────────────────────────── */}
         <section>
-          <SectionLabel>what the otel filter is doing</SectionLabel>
+          <SectionLabel>active collector filter</SectionLabel>
           <div style={{
-            background: '#0a0d14', border: '1px solid #1a1f2e',
-            borderRadius: 8, padding: '16px 20px',
-            fontFamily: "'IBM Plex Mono', monospace", fontSize: 11,
-            color: '#3a4a5a', lineHeight: 1.9
+            background: '#0a0d14', border: '1px solid #1a1f2e', borderRadius: 8,
+            padding: '16px 20px', fontFamily: "'IBM Plex Mono', monospace",
+            fontSize: 11, color: '#3a4a5a', lineHeight: 1.9
           }}>
-            <p style={{ color: '#00d4a0', marginBottom: 8 }}>
-              # collector.yaml — filter processor
-            </p>
-            <p>processors:</p>
-            <p>&nbsp; filter/device_a_subset:</p>
-            <p>&nbsp;&nbsp;&nbsp; metrics:</p>
-            <p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; metric:</p>
-            <p style={{ color: '#e0a03a' }}>
-              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; - 'name != "device.temperature"
-              and name != "device.pressure"'
-            </p>
-            <p style={{ marginTop: 12, color: '#2a3a4a' }}>
-              # battery_level and errors match this rule → they are DROPPED
-            </p>
-            <p style={{ color: '#2a3a4a' }}>
-              # temperature and pressure do NOT match → they PASS THROUGH
-            </p>
+            <p style={{ color: '#00d4a0', marginBottom: 8 }}># config/devices.json → collector filter</p>
+            {devices.map(device => device.metrics.map(m => (
+              <p key={m.name} style={{ color: m.collect ? '#5a8a6a' : '#3a2a2a' }}>
+                {m.collect ? '  ✓ pass  ' : '  ✗ drop  '}{m.name}
+                <span style={{ color: '#2a3040', marginLeft: 12 }}>
+                  {m.collect ? '(collect: true)' : '(collect: false)'}
+                </span>
+              </p>
+            )))}
           </div>
         </section>
 
@@ -194,8 +181,6 @@ export default function App() {
     </>
   );
 }
-
-// ─── Small helper components ──────────────────────────────────────────────────
 
 function SectionLabel({ children }) {
   return (
